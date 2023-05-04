@@ -322,6 +322,9 @@ export const getSSRLambdas = async (publish: string, baseDir: string): Promise<S
   ]
 }
 
+// TODO: check if there's any other glob specialties missing
+const escapeGlob = (path: string) => path.replace(/\[/g, '*').replace(/\]/g, '*')
+
 const getSSRRoutes = async (publish: string): Promise<RouteConfig[]> => {
   const pages = (await readJSON(join(publish, 'server', 'pages-manifest.json'))) as Record<string, string>
   const routes = Object.entries(pages).filter(
@@ -335,7 +338,7 @@ const getSSRRoutes = async (publish: string): Promise<RouteConfig[]> => {
       const compiledPath = join(publish, 'server', compiled)
 
       const routeDependencies = await getDependenciesOfFile(compiledPath)
-      const includedFiles = [compiledPath, ...routeDependencies]
+      const includedFiles = [compiledPath, ...routeDependencies].map(escapeGlob)
 
       return {
         functionName,
