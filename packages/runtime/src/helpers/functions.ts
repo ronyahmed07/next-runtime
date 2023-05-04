@@ -29,12 +29,15 @@ import { getFunctionNameForPage } from './utils'
 
 // TODO, for reviewer: I added my properties here because that was the easiest way,
 // but is it the right spot for it?
-export interface ApiRouteConfig {
+export interface RouteConfig {
   functionName: string
   route: string
-  config: ApiConfig
   compiled: string
   includedFiles: string[]
+}
+
+export interface ApiRouteConfig extends RouteConfig {
+  config: ApiConfig
 }
 
 export interface APILambda {
@@ -44,10 +47,18 @@ export interface APILambda {
   type?: ApiRouteType
 }
 
+export interface SSRLambda {
+  functionName: string
+  routes: RouteConfig[]
+  includedFiles: string[]
+  type?: ApiRouteType
+}
+
 export const generateFunctions = async (
   { FUNCTIONS_SRC = DEFAULT_FUNCTIONS_SRC, INTERNAL_FUNCTIONS_SRC, PUBLISH_DIR }: NetlifyPluginConstants,
   appDir: string,
   apiLambdas: APILambda[],
+  ssrLambdas: SSRLambda[],
 ): Promise<void> => {
   const publish = resolve(PUBLISH_DIR)
   const functionsDir = resolve(INTERNAL_FUNCTIONS_SRC || FUNCTIONS_SRC)
@@ -116,6 +127,12 @@ export const generateFunctions = async (
       join(functionsDir, functionName, 'handlerUtils.js'),
     )
     writeFunctionConfiguration({ functionName, functionTitle, functionsDir })
+
+    const nfInternalFiles = await glob(join(functionsDir, functionName, '**'))
+    const lambda = ssrLambdas.find((l) => l.functionName === functionName)
+    if (lambda) {
+      lambda.includedFiles.push(...nfInternalFiles)
+    }
   }
 
   await writeHandler(HANDLER_FUNCTION_NAME, HANDLER_FUNCTION_TITLE, false)
@@ -245,16 +262,20 @@ const traceNextServer = async (publish: string, baseDir: string): Promise<string
   return filtered.map((file) => relative(baseDir, file))
 }
 
-export const getAPIPRouteCommonDependencies = async (publish: string, baseDir: string) => {
-  const [requiredServerFiles, nextServerFiles, followRedirectsFiles] = await Promise.all([
+export const getCommonDependencies = async (publish: string, baseDir: string) => {
+  const deps = await Promise.all([
     traceRequiredServerFiles(publish),
     traceNextServer(publish, baseDir),
 
-    // used by our own bridge.js
-    glob(join(dirname(require.resolve('follow-redirects', { paths: [publish] })), '**', '*')),
+    ...[
+      'follow-redirects',
+      // using package.json because otherwise, we'd find some /dist/... path
+      '@netlify/functions/package.json',
+      'is-promise',
+    ].map((dep) => glob(join(dirname(require.resolve(dep, { paths: [publish] })), '**', '*'))),
   ])
 
-  return [...requiredServerFiles, ...nextServerFiles, ...followRedirectsFiles]
+  return deps.flat(1)
 }
 
 const sum = (arr: number[]) => arr.reduce((v, current) => v + current, 0)
@@ -279,6 +300,53 @@ const getBundleWeight = async (patterns: string[]) => {
   return sum(sizes.flat(1))
 }
 
+export const getSSRLambdas = async (publish: string, baseDir: string): Promise<SSRLambda[]> => {
+  const commonDependencies = await getCommonDependencies(publish, baseDir)
+  const ssrRoutes = await getSSRRoutes(publish)
+
+  // TODO: for now, they're the same - but we should separate them
+  const nonOdbRoutes = ssrRoutes
+  const odbRoutes = ssrRoutes
+
+  return [
+    {
+      functionName: HANDLER_FUNCTION_NAME,
+      includedFiles: [...commonDependencies, ...nonOdbRoutes.flatMap((route) => route.includedFiles)],
+      routes: nonOdbRoutes,
+    },
+    {
+      functionName: ODB_FUNCTION_NAME,
+      includedFiles: [...commonDependencies, ...odbRoutes.flatMap((route) => route.includedFiles)],
+      routes: odbRoutes,
+    },
+  ]
+}
+
+const getSSRRoutes = async (publish: string): Promise<RouteConfig[]> => {
+  const pages = (await readJSON(join(publish, 'server', 'pages-manifest.json'))) as Record<string, string>
+  const routes = Object.entries(pages).filter(
+    ([page, compiled]) => !page.startsWith('/api/') && !compiled.endsWith('.html'),
+  )
+
+  return await Promise.all(
+    routes.map(async ([route, compiled]) => {
+      const functionName = getFunctionNameForPage(route)
+
+      const compiledPath = join(publish, 'server', compiled)
+
+      const routeDependencies = await getDependenciesOfFile(compiledPath)
+      const includedFiles = [compiledPath, ...routeDependencies]
+
+      return {
+        functionName,
+        route,
+        compiled,
+        includedFiles,
+      }
+    }),
+  )
+}
+
 const MB = 1024 * 1024
 
 export const getAPILambdas = async (
@@ -287,7 +355,7 @@ export const getAPILambdas = async (
   pageExtensions: string[],
 ): Promise<APILambda[]> => {
   console.time('traceCommonDependencies')
-  const commonDependencies = await getAPIPRouteCommonDependencies(publish, baseDir)
+  const commonDependencies = await getCommonDependencies(publish, baseDir)
   console.timeEnd('traceCommonDependencies')
 
   console.time('weighCommonDependencies')

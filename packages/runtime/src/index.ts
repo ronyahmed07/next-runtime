@@ -18,7 +18,7 @@ import {
 import { onPreDev } from './helpers/dev'
 import { writeEdgeFunctions, loadMiddlewareManifest, cleanupEdgeFunctions } from './helpers/edge'
 import { moveStaticPages, movePublicFiles, patchNextFiles } from './helpers/files'
-import { splitApiRoutes } from './helpers/flags'
+import { splitApiRoutes, useNFTFilesForBundling } from './helpers/flags'
 import {
   generateFunctions,
   setupImageFunction,
@@ -28,6 +28,7 @@ import {
   packSingleFunction,
   getExtendedApiRouteConfigs,
   APILambda,
+  getSSRLambdas,
 } from './helpers/functions'
 import { generateRedirects, generateStaticRedirects } from './helpers/redirects'
 import { shouldSkip, isNextAuthInstalled, getCustomImageResponseHeaders, getRemotePatterns } from './helpers/utils'
@@ -172,15 +173,19 @@ const plugin: NetlifyPlugin = {
           extendedRoutes.map(packSingleFunction),
         )
 
+    const ssrLambdas = useNFTFilesForBundling(featureFlags) ? await getSSRLambdas(publish, appDir) : []
+
+    await generateFunctions(constants, appDir, apiLambdas, ssrLambdas)
+
     await configureHandlerFunctions({
       netlifyConfig,
       ignore,
       publish: relative(process.cwd(), publish),
       apiLambdas,
+      ssrLambdas,
       featureFlags,
     })
 
-    await generateFunctions(constants, appDir, apiLambdas)
     await generatePagesResolver(constants)
 
     await movePublicFiles({ appDir, outdir, publish, basePath })

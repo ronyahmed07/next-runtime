@@ -16,3 +16,16 @@ export const splitApiRoutes = (featureFlags: Record<string, unknown>): boolean =
   // default to true during testing, swap to false before merging
   return typeof featureFlags.next_split_api_routes === 'boolean' ? featureFlags.next_split_api_routes : true
 }
+
+/**
+ * TODO: write comment
+ */
+export const useNFTFilesForBundling = (featureFlags: Record<string, unknown>): boolean => {
+  if (process.env.NEXT_USE_NFT_FILES_FOR_BUNDLING) {
+    return process.env.NEXT_USE_NFT_FILES_FOR_BUNDLING === 'true'
+  }
+  // default to true during testing, swap to false before merging
+  return typeof featureFlags.next_use_nft_files_for_bundling === 'boolean'
+    ? featureFlags.next_use_nft_files_for_bundling
+    : true
+}
