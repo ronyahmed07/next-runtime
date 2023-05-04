@@ -1,8 +1,11 @@
+import { basename, extname } from 'path'
+
 import type { NetlifyConfig, NetlifyPluginConstants } from '@netlify/build'
 import bridgeFile from '@vercel/node-bridge'
 import chalk from 'chalk'
 import destr from 'destr'
 import { copyFile, ensureDir, existsSync, readJSON, writeFile, writeJSON, stat } from 'fs-extra'
+import type { PrerenderManifest } from 'next/dist/build'
 import type { ImageConfigComplete, RemotePattern } from 'next/dist/shared/lib/image-config'
 import { outdent } from 'outdent'
 import { join, relative, resolve, dirname } from 'pathe'
@@ -300,6 +303,34 @@ const getBundleWeight = async (patterns: string[]) => {
   return sum(sizes.flat(1))
 }
 
+const changeExtension = (file: string, extension: string) => {
+  const base = basename(file, extname(file))
+  return join(dirname(file), base + extension)
+}
+
+const getSSRDependencies = async (publish: string): Promise<string[]> => {
+  const prerenderManifest: PrerenderManifest = await readJSON(join(publish, 'prerender-manifest.json'))
+
+  return Object.entries(prerenderManifest.routes).flatMap(([route, ssgRoute]) => {
+    if (ssgRoute.initialRevalidateSeconds === false) {
+      return []
+    }
+
+    if (ssgRoute.dataRoute.endsWith('.rsc')) {
+      return [
+        join(publish, 'server', 'app', ssgRoute.dataRoute),
+        join(publish, 'server', 'app', changeExtension(ssgRoute.dataRoute, '.html')),
+      ]
+    }
+
+    const trimmedPath = route === '/' ? 'index' : route.slice(1)
+    return [
+      join(publish, 'server', 'pages', `${trimmedPath}.html`),
+      join(publish, 'server', 'pages', `${trimmedPath}.json`),
+    ]
+  })
+}
+
 export const getSSRLambdas = async (publish: string, baseDir: string): Promise<SSRLambda[]> => {
   const commonDependencies = await getCommonDependencies(publish, baseDir)
   const ssrRoutes = await getSSRRoutes(publish)
@@ -307,6 +338,8 @@ export const getSSRLambdas = async (publish: string, baseDir: string): Promise<S
   // TODO: for now, they're the same - but we should separate them
   const nonOdbRoutes = ssrRoutes
   const odbRoutes = ssrRoutes
+
+  const ssrDependencies = await getSSRDependencies(publish)
 
   return [
     {
@@ -316,14 +349,14 @@ export const getSSRLambdas = async (publish: string, baseDir: string): Promise<S
     },
     {
       functionName: ODB_FUNCTION_NAME,
-      includedFiles: [...commonDependencies, ...odbRoutes.flatMap((route) => route.includedFiles)],
+      includedFiles: [...commonDependencies, ...odbRoutes.flatMap((route) => route.includedFiles), ...ssrDependencies],
       routes: odbRoutes,
     },
   ]
 }
 
 // TODO: check if there's any other glob specialties missing
-const escapeGlob = (path: string) => path.replace(/\[/g, '*').replace(/\]/g, '*')
+const escapeGlob = (path: string) => path.replace(/\[/g, '*').replace(/]/g, '*')
 
 const getSSRRoutes = async (publish: string): Promise<RouteConfig[]> => {
   const pages = (await readJSON(join(publish, 'server', 'pages-manifest.json'))) as Record<string, string>
