@@ -311,24 +311,27 @@ const changeExtension = (file: string, extension: string) => {
 const getSSRDependencies = async (publish: string): Promise<string[]> => {
   const prerenderManifest: PrerenderManifest = await readJSON(join(publish, 'prerender-manifest.json'))
 
-  return Object.entries(prerenderManifest.routes).flatMap(([route, ssgRoute]) => {
-    if (ssgRoute.initialRevalidateSeconds === false) {
-      return []
-    }
+  return [
+    ...Object.entries(prerenderManifest.routes).flatMap(([route, ssgRoute]) => {
+      if (ssgRoute.initialRevalidateSeconds === false) {
+        return []
+      }
 
-    if (ssgRoute.dataRoute.endsWith('.rsc')) {
+      if (ssgRoute.dataRoute.endsWith('.rsc')) {
+        return [
+          join(publish, 'server', 'app', ssgRoute.dataRoute),
+          join(publish, 'server', 'app', changeExtension(ssgRoute.dataRoute, '.html')),
+        ]
+      }
+
+      const trimmedPath = route === '/' ? 'index' : route.slice(1)
       return [
-        join(publish, 'server', 'app', ssgRoute.dataRoute),
-        join(publish, 'server', 'app', changeExtension(ssgRoute.dataRoute, '.html')),
+        join(publish, 'server', 'pages', `${trimmedPath}.html`),
+        join(publish, 'server', 'pages', `${trimmedPath}.json`),
       ]
-    }
-
-    const trimmedPath = route === '/' ? 'index' : route.slice(1)
-    return [
-      join(publish, 'server', 'pages', `${trimmedPath}.html`),
-      join(publish, 'server', 'pages', `${trimmedPath}.json`),
-    ]
-  })
+    }),
+    join(publish, '**', '*.html'),
+  ]
 }
 
 export const getSSRLambdas = async (publish: string, baseDir: string): Promise<SSRLambda[]> => {
@@ -344,12 +347,16 @@ export const getSSRLambdas = async (publish: string, baseDir: string): Promise<S
   return [
     {
       functionName: HANDLER_FUNCTION_NAME,
-      includedFiles: [...commonDependencies, ...nonOdbRoutes.flatMap((route) => route.includedFiles)],
+      includedFiles: [
+        ...commonDependencies,
+        ...ssrDependencies,
+        ...nonOdbRoutes.flatMap((route) => route.includedFiles),
+      ],
       routes: nonOdbRoutes,
     },
     {
       functionName: ODB_FUNCTION_NAME,
-      includedFiles: [...commonDependencies, ...odbRoutes.flatMap((route) => route.includedFiles), ...ssrDependencies],
+      includedFiles: [...commonDependencies, ...ssrDependencies, ...odbRoutes.flatMap((route) => route.includedFiles)],
       routes: odbRoutes,
     },
   ]
