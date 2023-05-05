@@ -265,17 +265,26 @@ const traceNextServer = async (publish: string, baseDir: string): Promise<string
   return filtered.map((file) => relative(baseDir, file))
 }
 
+export const traceNPMPackage = async (packageName: string, publish: string) => {
+  try {
+    return await glob(join(dirname(require.resolve(packageName, { paths: [publish] })), '**', '*'))
+  } catch (error) {
+    if (process.env.NODE_ENV === 'test') {
+      return []
+    }
+    throw error
+  }
+}
+
 export const getCommonDependencies = async (publish: string, baseDir: string) => {
   const deps = await Promise.all([
     traceRequiredServerFiles(publish),
     traceNextServer(publish, baseDir),
 
-    ...[
-      'follow-redirects',
-      // using package.json because otherwise, we'd find some /dist/... path
-      '@netlify/functions/package.json',
-      'is-promise',
-    ].map((dep) => glob(join(dirname(require.resolve(dep, { paths: [publish] })), '**', '*'))),
+    traceNPMPackage('follow-redirects', publish),
+    // using package.json because otherwise, we'd find some /dist/... path
+    traceNPMPackage('@netlify/functions/package.json', publish),
+    traceNPMPackage('is-promise', publish),
   ])
 
   return deps.flat(1)
@@ -397,13 +406,9 @@ export const getAPILambdas = async (
   baseDir: string,
   pageExtensions: string[],
 ): Promise<APILambda[]> => {
-  console.time('traceCommonDependencies')
   const commonDependencies = await getCommonDependencies(publish, baseDir)
-  console.timeEnd('traceCommonDependencies')
 
-  console.time('weighCommonDependencies')
   const threshold = 50 * MB - (await getBundleWeight(commonDependencies))
-  console.timeEnd('weighCommonDependencies')
 
   const apiRoutes = await getApiRouteConfigs(publish, baseDir, pageExtensions)
 
@@ -485,7 +490,7 @@ export const getApiRouteConfigs = async (
 export const getExtendedApiRouteConfigs = async (
   publish: string,
   baseDir: string,
-  pageExtensions?: string[],
+  pageExtensions: string[],
 ): Promise<Array<ApiRouteConfig>> => {
   const settledApiRoutes = await getApiRouteConfigs(publish, baseDir, pageExtensions)
 
