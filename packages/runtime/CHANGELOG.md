@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.37.2](https://github.com/netlify/next-runtime/compare/plugin-nextjs-v4.37.1...plugin-nextjs-v4.37.2) (2023-05-17)
+
+
+### Bug Fixes
+
+* resolve follow-redirects from runtime package, so it's available also in auto-installs ([#2124](https://github.com/netlify/next-runtime/issues/2124)) ([49ada27](https://github.com/netlify/next-runtime/commit/49ada272e732542a85f2618c065080444e1c299c))
+
 ## [4.37.1](https://github.com/netlify/next-runtime/compare/plugin-nextjs-v4.37.0...plugin-nextjs-v4.37.1) (2023-05-17)
 
 
